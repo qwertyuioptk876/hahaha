@@ -1,0 +1,20 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+local function createStaticVoidPlatform()
+    local platform = Instance.new("Part")
+    platform.Name = "AntiVoidPlatform"
+    platform.Size = Vector3.new(2048, 100, 2048)  -- 非常大也加厚
+    platform.Position = Vector3.new(0, -450, 0)   -- 接近虛空，但不會太低
+    platform.Anchored = true
+    platform.CanCollide = true
+    platform.Transparency = 1                    -- 完全隱形
+    platform.Parent = workspace
+end
+
+-- 等待角色生成後建立平台
+if player.Character then
+    createStaticVoidPlatform()
+else
+    player.CharacterAdded:Once(createStaticVoidPlatform)
+end
