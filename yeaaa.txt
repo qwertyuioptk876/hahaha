@@ -1,0 +1,54 @@
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+
+-- 建立假的角色模型
+local fakeModel = Instance.new("Model")
+fakeModel.Name = "FakeCharacter"
+
+-- 用一個簡單的透明Part代表身體
+local fakePart = Instance.new("Part")
+fakePart.Name = "FakeBody"
+fakePart.Size = Vector3.new(2, 5, 1)
+fakePart.Anchored = true
+fakePart.CanCollide = false
+fakePart.Transparency = 0 -- 完全可見，或改透明度讓它看起來比較像幻影
+fakePart.BrickColor = BrickColor.new("Bright green")
+fakePart.CFrame = hrp.CFrame
+fakePart.Parent = fakeModel
+
+fakeModel.Parent = workspace
+
+-- 持續追蹤 HumanoidRootPart 位置，更新假的模型位置
+game:GetService("RunService").RenderStepped:Connect(function()
+    if hrp and fakePart then
+        fakePart.CFrame = hrp.CFrame
+    end
+end)
+
+-- 清理機制：當角色重生，刪除舊的假模型，建立新的
+player.CharacterAdded:Connect(function(newChar)
+    if fakeModel then
+        fakeModel:Destroy()
+    end
+
+    character = newChar
+    hrp = character:WaitForChild("HumanoidRootPart")
+
+    fakeModel = Instance.new("Model")
+    fakeModel.Name = "FakeCharacter"
+
+    fakePart = Instance.new("Part")
+    fakePart.Name = "FakeBody"
+    fakePart.Size = Vector3.new(2, 5, 1)
+    fakePart.Anchored = true
+    fakePart.CanCollide = false
+    fakePart.Transparency = 0
+    fakePart.BrickColor = BrickColor.new("Bright green")
+    fakePart.CFrame = hrp.CFrame
+    fakePart.Parent = fakeModel
+
+    fakeModel.Parent = workspace
+end)
