@@ -1,0 +1,53 @@
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+local function setupFakeCharacter()
+    local char = player.Character or player.CharacterAdded:Wait()
+
+    -- 複製一份角色模型作為假的角色
+    local fakeChar = char:Clone()
+    fakeChar.Name = "FakeCharacter"
+    fakeChar.Parent = workspace
+
+    -- 移除 Humanoid 及所有 Script，避免互相干擾
+    local hum = fakeChar:FindFirstChildOfClass("Humanoid")
+    if hum then hum:Destroy() end
+
+    for _, v in pairs(fakeChar:GetDescendants()) do
+        if v:IsA("Script") or v:IsA("LocalScript") or v:IsA("Humanoid") then
+            v:Destroy()
+        end
+        if v:IsA("BasePart") then
+            -- 假模型可見，且不碰撞
+            v.LocalTransparencyModifier = 0
+            v.CanCollide = false
+        end
+    end
+
+    -- 找 HumanoidRootPart
+    local rootPart = char:FindFirstChild("HumanoidRootPart")
+    local fakeRoot = fakeChar:FindFirstChild("HumanoidRootPart") or fakeChar.PrimaryPart
+
+    if rootPart and fakeRoot then
+        -- 假模型放原本位置
+        fakeRoot.CFrame = rootPart.CFrame
+        -- 將真角色移到很高的位置
+        char:MoveTo(rootPart.Position + Vector3.new(0, 5000, 0))
+    end
+
+    -- 持續同步假模型位置到真角色原本位置（保持假角色在真角色剛剛的位置）
+    game:GetService("RunService").RenderStepped:Connect(function()
+        if rootPart and fakeRoot then
+            -- 假角色跟隨真角色原本位置（X,Z同位置，Y 高度保持不變）
+            local targetPos = rootPart.Position - Vector3.new(0, 5000, 0)
+            fakeRoot.CFrame = CFrame.new(targetPos, targetPos + rootPart.CFrame.LookVector)
+        end
+    end)
+end
+
+if player.Character then
+    setupFakeCharacter()
+else
+    player.CharacterAdded:Connect(setupFakeCharacter)
+end
