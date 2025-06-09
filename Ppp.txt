@@ -1,0 +1,19 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- 建立加厚隱形平台
+local floor = Instance.new("Part")
+floor.Name = "InvisibleFloor"
+floor.Size = Vector3.new(50, 10, 50)  -- 厚度由1增加到10
+floor.Transparency = 1
+floor.Anchored = true
+floor.CanCollide = true
+floor.Position = Vector3.new(rootPart.Position.X, rootPart.Position.Y - 5, rootPart.Position.Z) -- 平台在角色正下方10/2=5單位
+floor.Parent = workspace
+
+-- 持續跟隨角色X,Z座標移動，Y維持相對高度
+game:GetService("RunService").Heartbeat:Connect(function()
+    floor.Position = Vector3.new(rootPart.Position.X, rootPart.Position.Y - 5, rootPart.Position.Z)
+end)
