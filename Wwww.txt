@@ -1,0 +1,327 @@
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- Player & Character
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- GUI Root
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FlyTeleportUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- State
+local flying = false
+local speed = 100
+local verticalVelocity = 0
+local flyConnection = nil
+local trail = nil
+local teleportOpen = false
+
+-- Color Palette
+local colors = {
+	Color3.fromRGB(255,85,85),
+	Color3.fromRGB(85,170,255),
+	Color3.fromRGB(85,255,127),
+	Color3.fromRGB(255,170,0),
+	Color3.fromRGB(255,255,85),
+	Color3.fromRGB(170,85,255),
+	Color3.fromRGB(0,255,255),
+}
+
+-- Helper: Draggable
+local function makeDraggable(frame)
+	local dragging, dragInput, startPos, inputStart
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragInput = input
+			inputStart = input.Position
+			startPos = frame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input == dragInput then
+			local delta = input.Position - inputStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+-- Helper: Click Animation
+local function applyClickEffect(button)
+	button.MouseButton1Click:Connect(function()
+		button.BackgroundTransparency = 0.5
+		wait(0.1)
+		button.BackgroundTransparency = 0
+	end)
+end
+
+-- Create Button
+local function createButton(name, text, pos, color)
+	local btn = Instance.new("TextButton")
+	btn.Name = name
+	btn.Size = UDim2.new(0, 100, 0, 40)
+	btn.Position = pos
+	btn.Text = text
+	btn.BackgroundColor3 = color or Color3.fromRGB(50, 50, 200)
+	btn.TextColor3 = Color3.new(1,1,1)
+	btn.Font = Enum.Font.SourceSansBold
+	btn.TextScaled = true
+	btn.BorderSizePixel = 0
+	btn.AutoButtonColor = true
+	btn.Active = true
+	btn.AnchorPoint = Vector2.new(0.5, 0.5)
+	btn.BackgroundTransparency = 0
+	btn.ClipsDescendants = false
+	btn.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = btn
+
+	makeDraggable(btn)
+	applyClickEffect(btn)
+
+	return btn
+end
+
+-- Trail Setup
+local function createTrail()
+	if trail then trail:Destroy() end
+	trail = Instance.new("Trail")
+	trail.Color = ColorSequence.new(Color3.new(1, 1, 0), Color3.new(1, 0, 0))
+	trail.Lifetime = 0.4
+	local att0 = Instance.new("Attachment", hrp)
+	local att1 = Instance.new("Attachment", hrp)
+	att1.Position = Vector3.new(0, 0, 2)
+	trail.Attachment0 = att0
+	trail.Attachment1 = att1
+	trail.Parent = hrp
+end
+
+-- Toggle Flight
+local function toggleFly()
+	flying = not flying
+	humanoid.PlatformStand = flying
+	if flying then
+		verticalVelocity = 0
+		createTrail()
+		if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+
+		flyConnection = RunService.RenderStepped:Connect(function()
+			local controlModule = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls()
+			local moveVector = controlModule:GetMoveVector()
+
+			if moveVector.Magnitude > 0 then
+				local cam = workspace.CurrentCamera
+				local camCFrame = cam.CFrame
+				local forward = Vector3.new(camCFrame.LookVector.X, 0, camCFrame.LookVector.Z).Unit
+				local right = Vector3.new(camCFrame.RightVector.X, 0, camCFrame.RightVector.Z).Unit
+				-- 這裡乘以 -1 修正前後方向
+				local direction = (forward * (-moveVector.Z) + right * moveVector.X).Unit * speed
+				hrp.Velocity = Vector3.new(direction.X, verticalVelocity, direction.Z)
+			else
+				hrp.Velocity = Vector3.new(0, verticalVelocity, 0)
+			end
+		end)
+	else
+		if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+		hrp.Velocity = Vector3.zero
+	end
+end
+
+-- UI 控制按鈕
+local flyBtn = createButton("FlyBtn", "✈️ 飛行", UDim2.new(0, 80, 0, 80), colors[1])
+flyBtn.MouseButton1Click:Connect(toggleFly)
+
+local upBtn = createButton("UpBtn", "⬆️ 上升", UDim2.new(0, 80, 0, 130), colors[3])
+local downBtn = createButton("DownBtn", "⬇️ 下降", UDim2.new(0, 80, 0, 180), colors[4])
+
+upBtn.MouseButton1Down:Connect(function()
+	if flying then verticalVelocity = speed end
+end)
+upBtn.MouseButton1Up:Connect(function()
+	if flying then verticalVelocity = 0 end
+end)
+
+downBtn.MouseButton1Down:Connect(function()
+	if flying then verticalVelocity = -speed end
+end)
+downBtn.MouseButton1Up:Connect(function()
+	if flying then verticalVelocity = 0 end
+end)
+
+-- 速度調整輸入框
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0, 100, 0, 40)
+speedBox.Position = UDim2.new(0, 80, 0, 230)
+speedBox.Text = tostring(speed)
+speedBox.PlaceholderText = "速度"
+speedBox.ClearTextOnFocus = false
+speedBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+speedBox.TextColor3 = Color3.new(1,1,1)
+speedBox.Font = Enum.Font.SourceSansBold
+speedBox.TextScaled = true
+speedBox.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 6)
+corner.Parent = speedBox
+
+makeDraggable(speedBox)
+
+speedBox.FocusLost:Connect(function()
+	local val = tonumber(speedBox.Text)
+	if val and val > 0 then
+		speed = val
+	end
+end)
+
+-- 傳送 UI 按鈕 + 可展開玩家列表
+local toggleTpBtn = createButton("TpToggle", "📜 傳送列表", UDim2.new(0, 80, 0, 300), colors[5])
+local playerFrame = Instance.new("Frame")
+playerFrame.Name = "PlayerList"
+playerFrame.Size = UDim2.new(0, 160, 0, 200)
+playerFrame.Position = UDim2.new(0, 200, 0, 80)
+playerFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+playerFrame.Visible = false
+playerFrame.ClipsDescendants = true
+playerFrame.Parent = screenGui
+
+local listCorner = Instance.new("UICorner")
+listCorner.CornerRadius = UDim.new(0, 8)
+listCorner.Parent = playerFrame
+
+local scrollBar = Instance.new("ScrollingFrame")
+scrollBar.Size = UDim2.new(1, 0, 1, 0)
+scrollBar.Position = UDim2.new(0, 0, 0, 0)
+scrollBar.BackgroundTransparency = 1
+scrollBar.BorderSizePixel = 0
+scrollBar.ScrollBarThickness = 8
+scrollBar.VerticalScrollBarInset = Enum.ScrollBarInset.Always
+scrollBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollBar.Parent = playerFrame
+
+local uiList = Instance.new("UIListLayout")
+uiList.SortOrder = Enum.SortOrder.LayoutOrder
+uiList.Parent = scrollBar
+
+-- 新增一個表，記錄按鈕是否處於長按狀態
+local teleportingStates = {}
+
+-- 更新傳送列表（包含長按持續傳送功能）
+local function updatePlayerList()
+	scrollBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+	-- 清除舊按鈕
+	for _, c in ipairs(scrollBar:GetChildren()) do
+		if c:IsA("TextButton") then c:Destroy() end
+	end
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player then
+			local btn = Instance.new("TextButton")
+			btn.Size = UDim2.new(1, 0, 0, 40)
+			btn.Text = "🚀 " .. plr.Name
+			btn.BackgroundColor3 = colors[(plr.UserId % #colors) + 1]
+			btn.TextColor3 = Color3.new(1,1,1)
+			btn.Font = Enum.Font.SourceSansBold
+			btn.TextScaled = true
+			btn.Parent = scrollBar
+
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = btn
+
+			applyClickEffect(btn)
+
+			teleportingStates[btn] = false
+
+			-- 點擊傳送一次
+			btn.MouseButton1Click:Connect(function()
+				if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+					hrp.CFrame = plr.Character.HumanoidRootPart.CFrame + Vector3.new(2, 2, 2)
+				end
+			end)
+
+			-- 長按傳送開始
+			btn.MouseButton1Down:Connect(function()
+				teleportingStates[btn] = true
+				coroutine.wrap(function()
+					while teleportingStates[btn] do
+						if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+							hrp.CFrame = plr.Character.HumanoidRootPart.CFrame + Vector3.new(2, 2, 2)
+						end
+						task.wait(0.2)
+					end
+				end)()
+			end)
+
+			-- 放開停止傳送
+			btn.MouseButton1Up:Connect(function()
+				teleportingStates[btn] = false
+			end)
+		end
+	end
+
+	scrollBar.CanvasSize = UDim2.new(0, 0, 0, uiList.AbsoluteContentSize.Y)
+end
+
+-- 自動更新傳送列表
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(updatePlayerList)
+updatePlayerList()
+
+toggleTpBtn.MouseButton1Click:Connect(function()
+	teleportOpen = not teleportOpen
+	playerFrame.Visible = teleportOpen
+end)
+
+-- 監聽滑鼠放開，避免滑鼠放開在按鈕外導致長按狀態沒解除
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		for btn, _ in pairs(teleportingStates) do
+			teleportingStates[btn] = false
+		end
+	end
+end)
+
+-- 行動裝置：觸控放開也要解除傳送狀態
+UserInputService.TouchEnded:Connect(function(input, processed)
+	for btn, _ in pairs(teleportingStates) do
+		teleportingStates[btn] = false
+	end
+end)
+
+-- 進階保護：滑鼠移出視窗也強制取消（Desktop & 模擬器保險用）
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		local mouse = input.Position
+		local viewportSize = workspace.CurrentCamera.ViewportSize
+		if mouse.X < 0 or mouse.Y < 0 or mouse.X > viewportSize.X or mouse.Y > viewportSize.Y then
+			for btn, _ in pairs(teleportingStates) do
+				teleportingStates[btn] = false
+			end
+		end
+	end
+end)
+
+-- 角色重生重新綁定重要元件
+player.CharacterAdded:Connect(function(char)
+	character = char
+	hrp = character:WaitForChild("HumanoidRootPart")
+	humanoid = character:WaitForChild("Humanoid")
+
+	if flying then
+		humanoid.PlatformStand = true
+		createTrail()
+	end
+end)
