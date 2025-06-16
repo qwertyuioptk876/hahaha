@@ -1,0 +1,119 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local player = Players.LocalPlayer
+
+-- 建立 GUI
+local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+gui.Name = "AutoClickGUI"
+gui.ResetOnSpawn = false
+
+-- 外框設定
+local function createStyledButton(size, pos, bgColor)
+	local border = Instance.new("Frame", gui)
+	border.Size = size + UDim2.new(0, 6, 0, 6)
+	border.Position = pos - UDim2.new(0, 3, 0, 3)
+	border.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+	border.BackgroundTransparency = 0.2
+	border.BorderSizePixel = 0
+	border.ZIndex = 4
+	border.Name = "Border"
+
+	local btn = Instance.new("ImageButton", border)
+	btn.Size = UDim2.new(1, -6, 1, -6)
+	btn.Position = UDim2.new(0, 3, 0, 3)
+	btn.BackgroundColor3 = bgColor
+	btn.BackgroundTransparency = 0.3
+	btn.Image = ""
+	btn.AutoButtonColor = false
+	btn.ZIndex = 5
+	return btn, border
+end
+
+-- 按鈕與圖示
+local toggleBtn, toggleBorder = createStyledButton(UDim2.new(0, 60, 0, 60), UDim2.new(0, 20, 0, 100), Color3.fromRGB(0, 200, 200))
+toggleBtn.Name = "ToggleButton"
+
+local toggleText = Instance.new("TextLabel", toggleBtn)
+toggleText.Size = UDim2.new(1, 0, 1, 0)
+toggleText.BackgroundTransparency = 1
+toggleText.Text = "開始"
+toggleText.TextScaled = true
+toggleText.TextColor3 = Color3.new(1, 1, 1)
+toggleText.Font = Enum.Font.GothamBold
+toggleText.ZIndex = 6
+
+local clickTarget = Instance.new("ImageButton", gui)
+clickTarget.Size = UDim2.new(0, 40, 0, 40)
+clickTarget.Position = UDim2.new(0, 200, 0, 100)
+clickTarget.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+clickTarget.BackgroundTransparency = 0.4
+clickTarget.Image = ""
+clickTarget.Name = "ClickTarget"
+clickTarget.ZIndex = 4
+
+-- 輸入欄
+local inputBox = Instance.new("TextBox", gui)
+inputBox.Size = UDim2.new(0, 80, 0, 35)
+inputBox.Position = UDim2.new(0, 20, 0, 170)
+inputBox.PlaceholderText = "間隔秒"
+inputBox.Text = "0.01"
+inputBox.TextScaled = true
+inputBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+inputBox.TextColor3 = Color3.new(0, 0, 0)
+inputBox.ZIndex = 5
+
+-- 拖曳功能
+local function makeDraggable(btn)
+	local dragging, offset
+	btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			offset = input.Position - btn.AbsolutePosition
+		end
+	end)
+	btn.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
+	RunService.RenderStepped:Connect(function()
+		if dragging then
+			local pos = UserInputService:GetMouseLocation() - offset
+			btn.Position = UDim2.new(0, pos.X, 0, pos.Y - 36)
+		end
+	end)
+end
+
+makeDraggable(toggleBorder)
+makeDraggable(clickTarget)
+makeDraggable(inputBox)
+
+-- 自動點擊主邏輯
+local running = false
+toggleBtn.MouseButton1Click:Connect(function()
+	running = not running
+	if running then
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 215, 0) -- 金色
+		toggleText.Text = "🐉"
+	else
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 200) -- 青色
+		toggleText.Text = "開始"
+	end
+
+	task.spawn(function()
+		while running do
+			local delayNum = tonumber(inputBox.Text) or 0
+			local pos = clickTarget.AbsolutePosition + clickTarget.AbsoluteSize / 2
+			VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 0)
+			VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 0)
+			task.wait(delayNum)
+		end
+	end)
+end)
+
+-- 重生保留 GUI
+Players.LocalPlayer.CharacterAdded:Connect(function()
+	gui.Parent = player:WaitForChild("PlayerGui")
+end)
