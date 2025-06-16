@@ -1,0 +1,89 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+
+local player = Players.LocalPlayer
+local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+gui.Name = "AutoTapGUI"
+gui.ResetOnSpawn = false
+
+local clickPos = UDim2.new(0.5, 0, 0.5, 0) -- 預設點擊位置
+local clicking = false
+local interval = 0.1
+
+-- 點擊目標小圓點（用來標示點擊位置）
+local target = Instance.new("ImageButton")
+target.Name = "TargetDot"
+target.Size = UDim2.new(0, 30, 0, 30)
+target.Position = clickPos
+target.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+target.BackgroundTransparency = 0.4
+target.Image = ""
+target.AnchorPoint = Vector2.new(0.5, 0.5)
+target.Parent = gui
+target.Draggable = true
+
+-- 開始/停止按鈕
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleClick"
+toggleBtn.Size = UDim2.new(0, 90, 0, 90)
+toggleBtn.Position = UDim2.new(0, 20, 1, -110)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+toggleBtn.BackgroundTransparency = 0.3
+toggleBtn.Text = "開始"
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.TextScaled = true
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.AnchorPoint = Vector2.new(0, 0)
+toggleBtn.Parent = gui
+toggleBtn.Draggable = true
+
+-- 點擊間隔輸入框
+local inputBox = Instance.new("TextBox")
+inputBox.Size = UDim2.new(0, 80, 0, 30)
+inputBox.Position = UDim2.new(0, 20, 1, -20)
+inputBox.PlaceholderText = "間隔(秒)"
+inputBox.Text = tostring(interval)
+inputBox.TextScaled = true
+inputBox.BackgroundTransparency = 0.3
+inputBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+inputBox.TextColor3 = Color3.new(1, 1, 1)
+inputBox.Font = Enum.Font.Gotham
+inputBox.Parent = gui
+
+-- 實際模擬點擊螢幕該位置
+local function clickAtScreenPos(x, y)
+    VIM:SendMouseButtonEvent(x, y, 0, true, game, 1)
+    VIM:SendMouseButtonEvent(x, y, 0, false, game, 1)
+end
+
+-- 開始/停止按鈕事件
+toggleBtn.MouseButton1Click:Connect(function()
+    clicking = not clicking
+    toggleBtn.Text = clicking and "停止" or "開始"
+
+    if clicking then
+        spawn(function()
+            while clicking do
+                local absPos = target.AbsolutePosition
+                local centerX = absPos.X + target.AbsoluteSize.X / 2
+                local centerY = absPos.Y + target.AbsoluteSize.Y / 2
+
+                clickAtScreenPos(centerX, centerY)
+
+                local delayTime = tonumber(inputBox.Text)
+                if delayTime and delayTime > 0 then
+                    interval = delayTime
+                end
+                task.wait(interval)
+            end
+        end)
+    end
+end)
+
+-- 死亡後重新建立 UI
+player.CharacterAdded:Connect(function()
+    task.wait(1)
+    gui.Parent = player:WaitForChild("PlayerGui")
+end)
