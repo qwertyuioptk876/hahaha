@@ -1,0 +1,239 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local localPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local playerGui = localPlayer:WaitForChild("PlayerGui", 10)
+if not playerGui then warn("PlayerGui 無法取得") return end
+
+local allPlayers = {}
+local selectedPlayer = nil
+local currentIndex = 1
+local longTeleporting = false
+
+-- 建立圓角
+local function makeRounded(uiElement, radius)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, radius or 8)
+	corner.Parent = uiElement
+end
+
+-- 主 GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "TeleportUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- 傳送按鈕（黃色）
+local toggleButton = Instance.new("TextButton")
+toggleButton.Text = "傳送"
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+toggleButton.Size = UDim2.new(0, 100, 0, 40)
+toggleButton.Position = UDim2.new(0, 100, 0, 100)
+toggleButton.TextScaled = true
+toggleButton.Active = true
+toggleButton.Draggable = true
+makeRounded(toggleButton)
+toggleButton.Parent = screenGui
+
+-- 面板
+local panelFrame = Instance.new("Frame")
+panelFrame.Size = UDim2.new(0, 250, 0, 120)
+panelFrame.Position = UDim2.new(0, 100, 0, 150)
+panelFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+panelFrame.Visible = false
+panelFrame.Active = true
+panelFrame.Draggable = true
+makeRounded(panelFrame)
+panelFrame.Parent = screenGui
+
+-- 左箭頭
+local leftButton = Instance.new("TextButton")
+leftButton.Text = "<"
+leftButton.Size = UDim2.new(0, 30, 0, 40)
+leftButton.Position = UDim2.new(0, 10, 0, 10)
+leftButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+leftButton.TextScaled = true
+makeRounded(leftButton)
+leftButton.Parent = panelFrame
+
+-- 玩家名稱
+local playerNameLabel = Instance.new("TextButton")
+playerNameLabel.Text = "玩家名稱"
+playerNameLabel.Size = UDim2.new(0, 170, 0, 40)
+playerNameLabel.Position = UDim2.new(0, 40, 0, 10)
+playerNameLabel.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+playerNameLabel.TextScaled = true
+makeRounded(playerNameLabel)
+playerNameLabel.Parent = panelFrame
+
+-- 右箭頭
+local rightButton = Instance.new("TextButton")
+rightButton.Text = ">"
+rightButton.Size = UDim2.new(0, 30, 0, 40)
+rightButton.Position = UDim2.new(0, 215, 0, 10)
+rightButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+rightButton.TextScaled = true
+makeRounded(rightButton)
+rightButton.Parent = panelFrame
+
+-- 點（藍）
+local pointButton = Instance.new("TextButton")
+pointButton.Text = "點"
+pointButton.Size = UDim2.new(0.5, -5, 0, 40)
+pointButton.Position = UDim2.new(0, 10, 0, 65)
+pointButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+pointButton.TextScaled = true
+makeRounded(pointButton)
+pointButton.Parent = panelFrame
+
+-- 長（紅）
+local longButton = Instance.new("TextButton")
+longButton.Text = "長"
+longButton.Size = UDim2.new(0.5, -5, 0, 40)
+longButton.Position = UDim2.new(0.5, 5, 0, 65)
+longButton.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+longButton.TextScaled = true
+makeRounded(longButton)
+longButton.Parent = panelFrame
+
+-- 更新玩家列表
+local function updatePlayerList()
+	allPlayers = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer then
+			table.insert(allPlayers, player)
+		end
+	end
+	if #allPlayers > 0 then
+		currentIndex = math.clamp(currentIndex, 1, #allPlayers)
+		selectedPlayer = allPlayers[currentIndex]
+		playerNameLabel.Text = selectedPlayer.Name
+	else
+		selectedPlayer = nil
+		playerNameLabel.Text = "無其他玩家"
+	end
+end
+
+-- 高度補償 + 延遲補償的預測位置
+local function calculateFrontPosition(hrp)
+	local velocity = hrp.Velocity
+	local speed = velocity.Magnitude
+
+	local moveDir = (speed > 1) and velocity.Unit or hrp.CFrame.LookVector
+	local faceDir = hrp.CFrame.LookVector
+	local blendedDirection = moveDir:Lerp(faceDir, 0.15).Unit
+
+	local pingTime = 0.125 -- 125ms 預估延遲
+	local lagOffset = blendedDirection * speed * pingTime
+
+	local finalDirection = (blendedDirection + lagOffset.Unit * 0.9).Unit
+	local basePos = hrp.Position + finalDirection * 3
+
+	local rayOrigin = basePos + Vector3.new(0, 5, 0)
+	local rayDir = Vector3.new(0, -50, 0)
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {localPlayer.Character}
+	rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+	local ray = workspace:Raycast(rayOrigin, rayDir, rayParams)
+
+	if ray then
+		local groundY = ray.Position.Y
+		local heightDiff = hrp.Position.Y - groundY
+		if heightDiff > 5 then
+			return Vector3.new(basePos.X, hrp.Position.Y + 1.5, basePos.Z)
+		else
+			return Vector3.new(basePos.X, groundY + 1.5, basePos.Z)
+		end
+	else
+		return Vector3.new(basePos.X, hrp.Position.Y + 1.5, basePos.Z)
+	end
+end
+
+-- 一次性瞬間傳送
+local function teleportOnce()
+	if not selectedPlayer then return end
+	local hrp = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+	local myHRP = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if hrp and myHRP then
+		myHRP.CFrame = CFrame.new(calculateFrontPosition(hrp))
+	end
+end
+
+-- 每幀傳送（持續追蹤）
+RunService.RenderStepped:Connect(function()
+	if longTeleporting and selectedPlayer then
+		local hrp = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local myHRP = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and myHRP then
+			myHRP.CFrame = CFrame.new(calculateFrontPosition(hrp))
+		end
+	end
+end)
+
+-- UI 控制
+toggleButton.MouseButton1Click:Connect(function()
+	panelFrame.Visible = not panelFrame.Visible
+	longTeleporting = false
+	updatePlayerList()
+end)
+
+leftButton.MouseButton1Click:Connect(function()
+	updatePlayerList()
+	if #allPlayers > 0 then
+		currentIndex = (currentIndex - 2) % #allPlayers + 1
+		selectedPlayer = allPlayers[currentIndex]
+		playerNameLabel.Text = selectedPlayer.Name
+	end
+	longTeleporting = false
+end)
+
+rightButton.MouseButton1Click:Connect(function()
+	updatePlayerList()
+	if #allPlayers > 0 then
+		currentIndex = (currentIndex) % #allPlayers + 1
+		selectedPlayer = allPlayers[currentIndex]
+		playerNameLabel.Text = selectedPlayer.Name
+	end
+	longTeleporting = false
+end)
+
+playerNameLabel.MouseButton1Click:Connect(function()
+	updatePlayerList()
+	teleportOnce()
+	longTeleporting = false
+end)
+
+pointButton.MouseButton1Click:Connect(function()
+	updatePlayerList()
+	teleportOnce()
+	longTeleporting = false
+end)
+
+longButton.MouseButton1Click:Connect(function()
+	updatePlayerList()
+	if selectedPlayer then
+		longTeleporting = true
+	end
+end)
+
+-- 玩家與角色變動
+Players.PlayerAdded:Connect(function()
+	task.wait(0.5)
+	updatePlayerList()
+end)
+
+Players.PlayerRemoving:Connect(function()
+	task.wait(0.5)
+	updatePlayerList()
+end)
+
+localPlayer.CharacterAdded:Connect(function()
+	task.wait(1)
+	updatePlayerList()
+	longTeleporting = false
+end)
+
+-- 初始化
+updatePlayerList()
