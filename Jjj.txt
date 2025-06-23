@@ -1,0 +1,246 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local localPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local playerGui = localPlayer:WaitForChild("PlayerGui", 10)
+if not playerGui then warn("PlayerGui 無法取得") return end
+
+local allPlayers, selectedPlayer, currentIndex = {}, nil, 1
+local longTeleporting = false
+local lastPredictPos, lastTargetPos = nil, nil
+local stillTimer = 0
+
+-- 預測參數
+local PING = 0.125
+local FORWARD = 3
+local EXTRA = 0.03
+local HISTORY_MAX = 6
+local posHistory, velHistory = {}, {}
+
+-- GUI 建立
+local function makeRounded(ui, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 8)
+	c.Parent = ui
+end
+
+local gui = Instance.new("ScreenGui", playerGui)
+gui.Name = "TeleportUI"
+gui.ResetOnSpawn = false
+
+local toggle = Instance.new("TextButton", gui)
+toggle.Text = "傳送"
+toggle.Size = UDim2.new(0, 100, 0, 40)
+toggle.Position = UDim2.new(0, 100, 0, 100)
+toggle.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+toggle.TextScaled = true
+toggle.Draggable, toggle.Active = true, true
+makeRounded(toggle)
+
+local panel = Instance.new("Frame", gui)
+panel.Size = UDim2.new(0, 250, 0, 120)
+panel.Position = UDim2.new(0, 100, 0, 150)
+panel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+panel.Visible, panel.Active, panel.Draggable = false, true, true
+makeRounded(panel)
+
+local left = Instance.new("TextButton", panel)
+left.Text = "<"
+left.Size = UDim2.new(0, 30, 0, 40)
+left.Position = UDim2.new(0, 10, 0, 10)
+left.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+left.TextScaled = true
+makeRounded(left)
+
+local label = Instance.new("TextButton", panel)
+label.Text = "玩家名稱"
+label.Size = UDim2.new(0, 170, 0, 40)
+label.Position = UDim2.new(0, 40, 0, 10)
+label.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+label.TextScaled = true
+makeRounded(label)
+
+local right = Instance.new("TextButton", panel)
+right.Text = ">"
+right.Size = UDim2.new(0, 30, 0, 40)
+right.Position = UDim2.new(0, 215, 0, 10)
+right.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+right.TextScaled = true
+makeRounded(right)
+
+local pointBtn = Instance.new("TextButton", panel)
+pointBtn.Text = "點"
+pointBtn.Size = UDim2.new(0.5, -5, 0, 40)
+pointBtn.Position = UDim2.new(0, 10, 0, 65)
+pointBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+pointBtn.TextScaled = true
+makeRounded(pointBtn)
+
+local longBtn = Instance.new("TextButton", panel)
+longBtn.Text = "長"
+longBtn.Size = UDim2.new(0.5, -5, 0, 40)
+longBtn.Position = UDim2.new(0.5, 5, 0, 65)
+longBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+longBtn.TextScaled = true
+makeRounded(longBtn)
+
+local function updatePlayers()
+	allPlayers = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= localPlayer then table.insert(allPlayers, p) end
+	end
+	if #allPlayers > 0 then
+		currentIndex = math.clamp(currentIndex, 1, #allPlayers)
+		selectedPlayer = allPlayers[currentIndex]
+		label.Text = selectedPlayer.Name
+	else
+		selectedPlayer, label.Text = nil, "無其他玩家"
+	end
+end
+
+-- 預測核心
+local function updateHistory(pos)
+	table.insert(posHistory, 1, pos)
+	if #posHistory > HISTORY_MAX then table.remove(posHistory) end
+
+	if #posHistory >= 2 then
+		local dt = 1/60
+		local vel = (posHistory[1] - posHistory[2]) / dt
+		table.insert(velHistory, 1, vel)
+		if #velHistory > HISTORY_MAX - 1 then table.remove(velHistory) end
+	end
+end
+
+local function avg(t)
+	local sum = Vector3.zero
+	for _, v in ipairs(t) do sum += v end
+	return #t > 0 and sum / #t or Vector3.zero
+end
+
+local function acceleration()
+	if #velHistory < 2 then return Vector3.zero end
+	local sum = Vector3.zero
+	for i = 1, #velHistory - 1 do
+		sum += (velHistory[i] - velHistory[i + 1])
+	end
+	return sum / (#velHistory - 1)
+end
+
+local function mixDir(hrp, vel)
+	local lv = hrp.CFrame.LookVector
+	return (vel.Magnitude > 1 and vel.Unit * 0.7 + lv * 0.3 or lv).Unit
+end
+
+local function curvature()
+	if #velHistory < 3 then return Vector3.zero end
+	local a, b = velHistory[1].Unit, velHistory[2].Unit
+	local angle = math.acos(math.clamp(a:Dot(b), -1, 1))
+	local crossY = a:Cross(b).Y
+	local sign = crossY >= 0 and 1 or -1
+	local side = Vector3.new(-a.Z, 0, a.X) * sign
+	return side * math.min(angle * 10, 2)
+end
+
+local function predict(hrp)
+	updateHistory(hrp.Position)
+	local vel = avg(velHistory)
+	local acc = acceleration()
+	local dir = mixDir(hrp, vel)
+	local curve = curvature()
+	local predictT = PING + EXTRA
+	local pos = hrp.Position + vel * predictT + 0.5 * acc * predictT^2 + curve + dir * FORWARD
+
+	-- 高度穩定
+	local ySmooth = math.clamp(pos.Y, hrp.Position.Y - 2, hrp.Position.Y + 3)
+	return Vector3.new(pos.X, ySmooth, pos.Z)
+end
+
+-- 傳送邏輯
+RunService.RenderStepped:Connect(function()
+	if longTeleporting and selectedPlayer then
+		local hrp = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local myHRP = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and myHRP then
+			local pred = predict(hrp)
+
+			-- 停止閃爍檢查
+			local nowPos = hrp.Position
+			if lastTargetPos and (nowPos - lastTargetPos).Magnitude < 0.1 then
+				stillTimer += 1
+			else
+				stillTimer = 0
+			end
+			lastTargetPos = nowPos
+
+			if stillTimer < 3 or not lastPredictPos or (pred - lastPredictPos).Magnitude > 0.05 then
+				myHRP.Velocity = Vector3.zero
+				myHRP.CFrame = CFrame.new(pred, hrp.Position)
+				lastPredictPos = pred
+			end
+		end
+	end
+end)
+
+-- UI 控制
+toggle.MouseButton1Click:Connect(function()
+	panel.Visible = not panel.Visible
+	longTeleporting = false
+	updatePlayers()
+end)
+
+left.MouseButton1Click:Connect(function()
+	updatePlayers()
+	if #allPlayers > 0 then
+		currentIndex = (currentIndex - 2) % #allPlayers + 1
+		selectedPlayer = allPlayers[currentIndex]
+		label.Text = selectedPlayer.Name
+	end
+	longTeleporting = false
+end)
+
+right.MouseButton1Click:Connect(function()
+	updatePlayers()
+	if #allPlayers > 0 then
+		currentIndex = currentIndex % #allPlayers + 1
+		selectedPlayer = allPlayers[currentIndex]
+		label.Text = selectedPlayer.Name
+	end
+	longTeleporting = false
+end)
+
+pointBtn.MouseButton1Click:Connect(function()
+	updatePlayers()
+	if selectedPlayer then
+		local hrp = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local myHRP = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and myHRP then
+			myHRP.CFrame = CFrame.new(predict(hrp), hrp.Position)
+		end
+	end
+	longTeleporting = false
+end)
+
+longBtn.MouseButton1Click:Connect(function()
+	updatePlayers()
+	if selectedPlayer then
+		longTeleporting = true
+	end
+end)
+
+Players.PlayerAdded:Connect(function()
+	task.wait(0.5)
+	updatePlayers()
+end)
+
+Players.PlayerRemoving:Connect(function()
+	task.wait(0.5)
+	updatePlayers()
+end)
+
+localPlayer.CharacterAdded:Connect(function()
+	task.wait(1)
+	updatePlayers()
+	longTeleporting = false
+end)
+
+updatePlayers()
