@@ -1,0 +1,253 @@
+-- Roblox 最強 3D 預測傳送腳本（完整功能，支援靜止補償、上下高度、曲率與加速度，手機UI）
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+if not PlayerGui then warn("找不到 PlayerGui") return end
+
+-- UI 建立
+local function makeRounded(ui, r)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, r or 8)
+    corner.Parent = ui
+end
+
+local screenGui = Instance.new("ScreenGui", PlayerGui)
+screenGui.Name = "TeleportUI"
+screenGui.ResetOnSpawn = false
+
+local toggleButton = Instance.new("TextButton", screenGui)
+toggleButton.Text = "傳送"
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+toggleButton.Size = UDim2.new(0, 100, 0, 40)
+toggleButton.Position = UDim2.new(0, 100, 0, 100)
+toggleButton.TextScaled = true
+toggleButton.Active = true
+toggleButton.Draggable = true
+makeRounded(toggleButton)
+
+local panelFrame = Instance.new("Frame", screenGui)
+panelFrame.Size = UDim2.new(0, 250, 0, 120)
+panelFrame.Position = UDim2.new(0, 100, 0, 150)
+panelFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+panelFrame.Visible = false
+panelFrame.Active = true
+panelFrame.Draggable = true
+makeRounded(panelFrame)
+
+local leftButton = Instance.new("TextButton", panelFrame)
+leftButton.Text = "<"
+leftButton.Size = UDim2.new(0, 30, 0, 40)
+leftButton.Position = UDim2.new(0, 10, 0, 10)
+leftButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+leftButton.TextScaled = true
+makeRounded(leftButton)
+
+local playerNameLabel = Instance.new("TextButton", panelFrame)
+playerNameLabel.Text = "玩家名稱"
+playerNameLabel.Size = UDim2.new(0, 170, 0, 40)
+playerNameLabel.Position = UDim2.new(0, 40, 0, 10)
+playerNameLabel.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+playerNameLabel.TextScaled = true
+makeRounded(playerNameLabel)
+
+local rightButton = Instance.new("TextButton", panelFrame)
+rightButton.Text = ">"
+rightButton.Size = UDim2.new(0, 30, 0, 40)
+rightButton.Position = UDim2.new(0, 215, 0, 10)
+rightButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+rightButton.TextScaled = true
+makeRounded(rightButton)
+
+local pointButton = Instance.new("TextButton", panelFrame)
+pointButton.Text = "點"
+pointButton.Size = UDim2.new(0.5, -5, 0, 40)
+pointButton.Position = UDim2.new(0, 10, 0, 65)
+pointButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+pointButton.TextScaled = true
+makeRounded(pointButton)
+
+local longButton = Instance.new("TextButton", panelFrame)
+longButton.Text = "長"
+longButton.Size = UDim2.new(0.5, -5, 0, 40)
+longButton.Position = UDim2.new(0.5, 5, 0, 65)
+longButton.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+longButton.TextScaled = true
+makeRounded(longButton)
+
+-- 變數與參數
+local allPlayers = {}
+local selectedPlayer = nil
+local currentIndex = 1
+local longTeleporting = false
+
+local PING = 0.125
+local EXTRA = 0.08
+local FORWARD = 3.5
+local HISTORY = 8
+
+local posHistory = {}
+local velHistory = {}
+local lastDir = Vector3.new(0, 0, 1)
+local lastHrpPos = nil
+local stillTimer = 0
+
+local function avg(tbl)
+    local sum = Vector3.zero
+    for _, v in ipairs(tbl) do sum += v end
+    return #tbl > 0 and (sum / #tbl) or Vector3.zero
+end
+
+local function curvature()
+    if #velHistory < 2 then return Vector3.zero end
+    return (velHistory[#velHistory] - velHistory[1]) * 0.3
+end
+
+local function acceleration()
+    if #velHistory < 2 then return Vector3.zero end
+    -- RenderStepped:Wait() 在這裡使用可能不準，使用固定時間0.016代替約60fps
+    return (velHistory[#velHistory] - velHistory[#velHistory - 1]) / 0.016
+end
+
+local function mixDir(hrp, vel)
+    local look = hrp.CFrame.LookVector
+    if look:Dot(vel.Unit) > 0.4 then
+        return (look + vel.Unit).Unit
+    else
+        return vel.Unit
+    end
+end
+
+local function updateHistory(pos)
+    table.insert(posHistory, pos)
+    if #posHistory > HISTORY then table.remove(posHistory, 1) end
+    local count = #posHistory
+    if count > 1 then
+        local deltaTime = 0.016 -- 固定時間間隔約60fps
+        local v = (posHistory[count] - posHistory[count - 1]) / deltaTime
+        table.insert(velHistory, v)
+        if #velHistory > HISTORY then table.remove(velHistory, 1) end
+    end
+end
+
+local function isStill(currentPos)
+    local moved = (lastHrpPos and (currentPos - lastHrpPos).Magnitude) or math.huge
+    lastHrpPos = currentPos
+    if moved < 0.1 then
+        stillTimer = stillTimer + 0.016
+    else
+        stillTimer = 0
+    end
+    return stillTimer > 0.25
+end
+
+local function predict(hrp)
+    updateHistory(hrp.Position)
+    local vel = avg(velHistory)
+    local acc = acceleration()
+    local curve = curvature()
+
+    local direction = vel.Magnitude > 1 and mixDir(hrp, vel) or lastDir
+    if vel.Magnitude > 1 then lastDir = direction end
+
+    local predictT = PING + EXTRA
+    local predicted = hrp.Position + vel * predictT + 0.5 * acc * predictT^2 + curve + direction * FORWARD
+    local y = math.clamp(predicted.Y, hrp.Position.Y - 2.5, hrp.Position.Y + 3)
+    return Vector3.new(predicted.X, y, predicted.Z)
+end
+
+local function getTargetPosition(hrp)
+    if isStill(hrp.Position) then
+        return hrp.Position + hrp.CFrame.LookVector * FORWARD
+    else
+        return predict(hrp)
+    end
+end
+
+local function updatePlayerList()
+    allPlayers = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(allPlayers, p)
+        end
+    end
+    if #allPlayers > 0 then
+        currentIndex = math.clamp(currentIndex, 1, #allPlayers)
+        selectedPlayer = allPlayers[currentIndex]
+        playerNameLabel.Text = selectedPlayer.Name
+    else
+        selectedPlayer = nil
+        playerNameLabel.Text = "無其他玩家"
+    end
+end
+
+-- 連接UI事件
+toggleButton.MouseButton1Click:Connect(function()
+    panelFrame.Visible = not panelFrame.Visible
+    longTeleporting = false
+    updatePlayerList()
+end)
+
+leftButton.MouseButton1Click:Connect(function()
+    updatePlayerList()
+    if #allPlayers > 0 then
+        currentIndex = (currentIndex - 2) % #allPlayers + 1
+        selectedPlayer = allPlayers[currentIndex]
+        playerNameLabel.Text = selectedPlayer.Name
+    end
+    longTeleporting = false
+end)
+
+rightButton.MouseButton1Click:Connect(function()
+    updatePlayerList()
+    if #allPlayers > 0 then
+        currentIndex = (currentIndex) % #allPlayers + 1
+        selectedPlayer = allPlayers[currentIndex]
+        playerNameLabel.Text = selectedPlayer.Name
+    end
+    longTeleporting = false
+end)
+
+local function teleportOnce()
+    if not selectedPlayer then return end
+    local targetHRP = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if targetHRP and myHRP then
+        myHRP.CFrame = CFrame.new(getTargetPosition(targetHRP))
+    end
+end
+
+playerNameLabel.MouseButton1Click:Connect(function()
+    updatePlayerList()
+    teleportOnce()
+    longTeleporting = false
+end)
+
+pointButton.MouseButton1Click:Connect(function()
+    teleportOnce()
+    longTeleporting = false
+end)
+
+longButton.MouseButton1Down:Connect(function()
+    if not selectedPlayer then return end
+    longTeleporting = true
+end)
+
+longButton.MouseButton1Up:Connect(function()
+    longTeleporting = false
+end)
+
+-- 主循環持續傳送
+RunService.Heartbeat:Connect(function()
+    if longTeleporting and selectedPlayer then
+        local targetHRP = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if targetHRP and myHRP then
+            myHRP.CFrame = CFrame.new(getTargetPosition(targetHRP))
+        end
+    end
+end)
+
+updatePlayerList()
