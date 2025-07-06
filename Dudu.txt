@@ -1,0 +1,106 @@
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local sensitivity = 1.0 -- 預設靈敏度
+local draggingCamera = false
+local lastTouchPos = nil
+
+-- ✅ 自訂鏡頭控制器（手機用）
+if UIS.TouchEnabled then
+	RunService:BindToRenderStep("CustomTouchCamera", Enum.RenderPriority.Camera.Value + 1, function()
+		if draggingCamera and lastTouchPos then
+			local currentTouch = UIS:GetTouchPositions()[1]
+			if currentTouch then
+				local delta = currentTouch - lastTouchPos
+				local angleY = -delta.X * 0.002 * sensitivity
+				local angleX = -delta.Y * 0.002 * sensitivity
+
+				-- 計算新鏡頭方向
+				local cf = camera.CFrame
+				local pos = cf.Position
+				local dir = cf.LookVector
+
+				local newCFrame = cf * CFrame.Angles(angleX, angleY, 0)
+				camera.CFrame = CFrame.new(pos) * (newCFrame - newCFrame.Position)
+				lastTouchPos = currentTouch
+			end
+		end
+	end)
+
+	UIS.TouchStarted:Connect(function(input)
+		draggingCamera = true
+		lastTouchPos = input.Position
+	end)
+
+	UIS.TouchEnded:Connect(function(input)
+		draggingCamera = false
+		lastTouchPos = nil
+	end)
+end
+
+-- ✅ UI 建立
+local gui = Instance.new("ScreenGui")
+gui.Name = "CameraSensitivityUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 50)
+frame.Position = UDim2.new(0, 20, 0, 100)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BackgroundTransparency = 0.2
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = frame
+
+local box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -10)
+box.Position = UDim2.new(0, 10, 0, 5)
+box.BackgroundTransparency = 1
+box.Text = tostring(sensitivity)
+box.PlaceholderText = "靈敏度 (如 1.5)"
+box.TextScaled = true
+box.TextColor3 = Color3.fromRGB(255, 255, 255)
+box.Font = Enum.Font.SourceSansBold
+box.ClearTextOnFocus = false
+box.Parent = frame
+
+-- ✅ 設定靈敏度
+local function setSensitivity(val)
+	if typeof(val) == "number" and val > 0 then
+		sensitivity = val
+		print("靈敏度設為", sensitivity)
+		frame:SetAttribute("SavedSensitivity", sensitivity)
+	end
+end
+
+box.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		local val = tonumber(box.Text)
+		if val then
+			setSensitivity(val)
+		else
+			box.Text = tostring(sensitivity)
+		end
+	end
+end)
+
+-- ✅ 玩家復活後保留設定
+player.CharacterAdded:Connect(function()
+	task.wait(1)
+	local saved = frame:GetAttribute("SavedSensitivity")
+	if saved then
+		setSensitivity(saved)
+	end
+end)
+
+-- ✅ 初始化
+setSensitivity(sensitivity)
