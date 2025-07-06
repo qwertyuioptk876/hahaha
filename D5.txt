@@ -1,0 +1,65 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local UserSettings = UserSettings()
+local cameraSettings = UserSettings.GameSettings
+
+local defaultSensitivity = 1.0
+
+-- 建立 GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "TouchSensitivityUI"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 50)
+frame.Position = UDim2.new(0, 20, 0, 100)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BackgroundTransparency = 0.2
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = frame
+
+local box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -10)
+box.Position = UDim2.new(0, 10, 0, 5)
+box.BackgroundTransparency = 1
+box.Text = tostring(defaultSensitivity)
+box.PlaceholderText = "鏡頭靈敏度（如 1.5）"
+box.TextScaled = true
+box.TextColor3 = Color3.fromRGB(255, 255, 255)
+box.Font = Enum.Font.SourceSansBold
+box.ClearTextOnFocus = false
+box.Parent = frame
+
+-- 修改 Touch 靈敏度
+local function setTouchSensitivity(value)
+	if typeof(value) == "number" and value > 0 then
+		cameraSettings.TouchCameraSensitivity = value
+		print("已套用 TouchCameraSensitivity：", value)
+
+		-- 👉 強制刷新攝影機控制器（這很關鍵）
+		local StarterPlayer = game:GetService("StarterPlayer")
+		StarterPlayer.CameraMode = Enum.CameraMode.Classic
+	end
+end
+
+-- 輸入靈敏度後生效
+box.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		local value = tonumber(box.Text)
+		if value then
+			setTouchSensitivity(value)
+		else
+			box.Text = tostring(defaultSensitivity)
+		end
+	end
+end)
+
+-- 初始也套用一次
+setTouchSensitivity(defaultSensitivity)
